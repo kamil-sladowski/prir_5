@@ -1,115 +1,94 @@
-import java.util.Comparator;
-import java.util.Iterator;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.omg.CORBA.IntHolder;
-import org.omg.CosNaming.NameComponent;
-import org.omg.CosNaming.NamingContext;
-import org.omg.CosNaming.NamingContextHelper;
-import org.omg.PortableServer.POA;
-
-import com.sun.corba.se.org.omg.CORBA.ORB;
+import org.omg.CosNaming.*;
+import org.omg.CORBA.*;
+import org.omg.PortableServer.*;
 
 class OptimizationImpl extends optimizationPOA implements optimizationOperations {
 
-    class ServerItem {
-        private short ip;
-        private int id;
-        private int timeout;
-        private long lastHello;
+    class SingleServer implements Comparator<SingleServer>{
+        public Short ip;
+        public int timeout;
+        public IntHolder id;
+        private long timeFromLastHello;
 
-        public ServerItem(int id, short ip, int timeout) {
-            this.id = id;
+        public SingleServer(Short ip, int timeout, IntHolder id) {
             this.ip = ip;
             this.timeout = timeout;
+            this.timeFromLastHello = System.currentTimeMillis();
+            this.id = id;
         }
 
-        public short getIp() {
-            return ip;
-        }
-
-        public int getId() {
-            return id;
-        }
-
-        public int getTimeout() {
-            return timeout;
-        }
-
-        public void setTimeout(int timeout) {
-            this.timeout = timeout;
-        }
-
-        public void hello() {
-            lastHello = System.currentTimeMillis();
-        }
 
         public boolean isActive() {
-            return System.currentTimeMillis() - lastHello < timeout;
+            return System.currentTimeMillis() - timeFromLastHello < timeout;
         }
-    }
+        public void activate() {
+                this.timeFromLastHello = System.currentTimeMillis();
+        }
 
-    class ServerItemIpComparator implements Comparator<ServerItem> {
         @Override
-        public int compare(ServerItem o1, ServerItem o2) {
-            return o1.getIp() - o2.getIp();
+        public int compare(SingleServer o1, SingleServer o2) {
+            return o1.ip - o2.ip;
         }
     }
 
-    static AtomicInteger idCount = new AtomicInteger(0);
+    private ConcurrentHashMap<IntHolder, SingleServer> servers = new ConcurrentHashMap<>();
+    private List<ArrayList<Short>> addressRange = Collections.synchronizedList(new ArrayList<>()); //not used
 
-    private ConcurrentHashMap<Integer, ServerItem> idServerMap = new ConcurrentHashMap<Integer, ServerItem>();
-    private ConcurrentHashMap<Short, ServerItem> ipServerMap = new ConcurrentHashMap<Short, ServerItem>();
-    private ConcurrentSkipListSet<ServerItem> serverList = new ConcurrentSkipListSet<ServerItem>(new ServerItemIpComparator());
 
     @Override
     public void register(short ip, int timeout, IntHolder id) {
-        ServerItem serverItem = ipServerMap.get(ip);
-        if (serverItem != null) {
-            serverItem.setTimeout(timeout);
-            id.value = serverItem.getId();
-        } else {
-            id.value = idCount.getAndIncrement();
-            serverItem = new ServerItem(id.value, ip, timeout);
-            serverItem.hello();
-            ipServerMap.put(ip, serverItem);
-            idServerMap.put(id.value, serverItem);
-            serverList.add(serverItem);
+        if(servers!=null && id != null){
+            if (!servers.containsKey(id)){
+                id.value = ip;
+                servers.put(id, new SingleServer(ip, timeout, id));
+            }else{
+                if(servers.get(id) != null){
+                    servers.get(id).activate();
+                }
+
+            }
         }
     }
 
+
     @Override
     public void hello(int id) {
-        ServerItem serverItem = idServerMap.get(id);
-        if (serverItem != null) {
-            serverItem.hello();
-        }
+        if (servers.contains(id))
+            servers.get(id).activate();
     }
 
     @Override
     public void best_range(rangeHolder r) {
-        range bestRange = null, tmpRange = null;
-        Iterator<ServerItem> it = serverList.iterator();
-        while (it.hasNext()) {
-            ServerItem sItem = it.next();
-            if (tmpRange == null && sItem.isActive()) {
-                tmpRange = new range(sItem.getIp(), sItem.getIp());
-            } else if (tmpRange != null && sItem.isActive()) {
-                if (sItem.getIp() - 1 == tmpRange.to) {
-                    tmpRange.to += 1;
-                } else {
-                    tmpRange = new range(sItem.getIp(), sItem.getIp());
-                }
-            } else {
-                tmpRange = null;
+        ArrayList<Short> tmpRange = new ArrayList<>();
+        ArrayList<Short> maxRange = new ArrayList<>();
+        for (SingleServer e: servers.values()){
+            if(e.isActive()){
+                tmpRange.add(Short.valueOf(e.ip));
             }
-            if (bestRange == null || tmpRange != null && tmpRange.to - tmpRange.from > bestRange.to - bestRange.from) {
-                bestRange = tmpRange;
+            else{
+
+                addressRange.add(tmpRange);
+                tmpRange = new ArrayList<>();
             }
         }
-        r.value = bestRange;
+        int maxSize = 0;
+
+        for(ArrayList<Short> oneList: addressRange) {
+            if (maxSize < oneList.size()) {
+                maxSize = oneList.size();
+                maxRange = oneList;
+            }
+        }
+        if (maxRange.size() != 0) {
+            Short[] stockArr = new Short[maxRange.size()];
+            stockArr = maxRange.toArray(stockArr);
+            r.value = new range(stockArr[0], maxRange.get(stockArr.length));
+        }
     }
 }
 

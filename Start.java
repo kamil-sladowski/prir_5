@@ -90,9 +90,10 @@ class OptimizationImpl extends optimizationPOA implements optimizationOperations
             stockArr = maxRange.toArray(stockArr);
             for (Short el: stockArr)
                 System.out.println("   -----    " + el);
-                System.out.println("   -stockArr[0]    " + stockArr[0]);
-                System.out.println("   -stockArr[stockArr.length-1]    " + stockArr[stockArr.length-1]);
-            r.value = new range(stockArr[0], stockArr[stockArr.length-1]);
+            System.out.println("   -stockArr[0]    " + stockArr[0]);
+            System.out.println("   -stockArr[stockArr.length-1]    " + stockArr[stockArr.length-1]);
+            range a = new range(stockArr[0], stockArr[stockArr.length-1]);
+            r.value = a;
         }
     }
 }

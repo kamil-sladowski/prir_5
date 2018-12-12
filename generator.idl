@@ -1,0 +1,10 @@
+struct range {
+   short from;
+   short to;
+};
+
+interface optimization {
+  void register( in short ip, in long timeout, out long id );
+  void hello( in long id );
+  void best_range( out range r );
+};

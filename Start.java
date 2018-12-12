@@ -87,7 +87,7 @@ class OptimizationImpl extends optimizationPOA implements optimizationOperations
         if (maxRange.size() != 0) {
             Short[] stockArr = new Short[maxRange.size()];
             stockArr = maxRange.toArray(stockArr);
-            r.value = new range(stockArr[0], maxRange.get(stockArr.length));
+            r.value = new range(stockArr[0], stockArr[stockArr.length-1]);
         }
     }
 }

@@ -1,78 +1,106 @@
-import java.util.*;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.omg.CosNaming.*;
-import org.omg.CORBA.*;
-import org.omg.PortableServer.*;
+import org.omg.CORBA.IntHolder;
+import org.omg.CosNaming.NameComponent;
+import org.omg.CosNaming.NamingContext;
+import org.omg.CosNaming.NamingContextHelper;
+import org.omg.PortableServer.POA;
+
+import com.sun.corba.se.org.omg.CORBA.ORB;
 
 class OptimizationImpl extends optimizationPOA implements optimizationOperations {
 
-    class SingleServer implements Comparator<SingleServer>{
-        public Short ip;
-        public int timeout;
-        public IntHolder id;
-        private long timeFromLastHello;
+    class ServerItem {
+        private short ip;
+        private int id;
+        private int timeout;
+        private long lastHello;
 
-        public SingleServer(Short ip, int timeout, IntHolder id) {
+        public ServerItem(int id, short ip, int timeout) {
+            this.id = id;
             this.ip = ip;
             this.timeout = timeout;
-            this.timeFromLastHello = System.currentTimeMillis();
-            this.id = id;
         }
 
+        public short getIp() {
+            return ip;
+        }
+
+        public int getId() {
+            return id;
+        }
+
+        public int getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(int timeout) {
+            this.timeout = timeout;
+        }
+
+        public void hello() {
+            lastHello = System.currentTimeMillis();
+        }
 
         public boolean isActive() {
-            return System.currentTimeMillis() - timeFromLastHello < timeout;
-        }
-        public void activate() {
-                this.timeFromLastHello = System.currentTimeMillis();
-        }
-
-        @Override
-        public int compare(SingleServer o1, SingleServer o2) {
-            return o1.ip - o2.ip;
+            return System.currentTimeMillis() - lastHello < timeout;
         }
     }
 
-    private ConcurrentHashMap<IntHolder, SingleServer> servers = new ConcurrentHashMap<>();
-    private List<ArrayList<Short>> addressRange = Collections.synchronizedList(new ArrayList<>()); //not used
+    class ServerItemIpComparator implements Comparator<ServerItem> {
+        @Override
+        public int compare(ServerItem o1, ServerItem o2) {
+            return o1.getIp() - o2.getIp();
+        }
+    }
 
+    static AtomicInteger idCount = new AtomicInteger(0);
+
+    private ConcurrentHashMap<Integer, ServerItem> idServerMap = new ConcurrentHashMap<Integer, ServerItem>();
+    private ConcurrentHashMap<Short, ServerItem> ipServerMap = new ConcurrentHashMap<Short, ServerItem>();
+    private ConcurrentSkipListSet<ServerItem> serverList = new ConcurrentSkipListSet<ServerItem>(new ServerItemIpComparator());
 
     @Override
     public void register(short ip, int timeout, IntHolder id) {
-        if(servers!=null && id != null){
-            if (!servers.containsKey(id)){
-                id.value = ip;
-                servers.put(id, new SingleServer(ip, timeout, id));
-            }else{
-                if(servers.get(id) != null){
-                    servers.get(id).activate();
-                }
-
-            }
+        ServerItem serverItem = ipServerMap.get(ip);
+        if (serverItem != null) {
+            serverItem.setTimeout(timeout);
+            id.value = serverItem.getId();
+        } else {
+            id.value = idCount.getAndIncrement();
+            serverItem = new ServerItem(id.value, ip, timeout);
+            serverItem.hello();
+            ipServerMap.put(ip, serverItem);
+            idServerMap.put(id.value, serverItem);
+            serverList.add(serverItem);
         }
     }
 
-
     @Override
     public void hello(int id) {
-        if (servers.contains(id))
-            servers.get(id).activate();
+        ServerItem serverItem = idServerMap.get(id);
+        if (serverItem != null) {
+            serverItem.hello();
+        }
     }
 
     @Override
     public void best_range(rangeHolder r) {
         range bestRange = null, tmpRange = null;
-        for (SingleServer sItem: servers.values()){
+        Iterator<ServerItem> it = serverList.iterator();
+        while (it.hasNext()) {
+            ServerItem sItem = it.next();
             if (tmpRange == null && sItem.isActive()) {
-                tmpRange = new range(sItem.ip, sItem.ip);
+                tmpRange = new range(sItem.getIp(), sItem.getIp());
             } else if (tmpRange != null && sItem.isActive()) {
-                if (sItem.ip - 1 == tmpRange.to) {
+                if (sItem.getIp() - 1 == tmpRange.to) {
                     tmpRange.to += 1;
                 } else {
-                    tmpRange = new range(sItem.ip, sItem.ip);
+                    tmpRange = new range(sItem.getIp(), sItem.getIp());
                 }
             } else {
                 tmpRange = null;
@@ -82,39 +110,6 @@ class OptimizationImpl extends optimizationPOA implements optimizationOperations
             }
         }
         r.value = bestRange;
-//        ArrayList<Short> tmpRange = new ArrayList<>();
-//        ArrayList<Short> maxRange = new ArrayList<>();
-//        for (SingleServer e: servers.values()){
-//            if(e.isActive()){
-//                tmpRange.add(Short.valueOf(e.ip));
-//            }
-//            else{
-//
-//                addressRange.add(tmpRange);
-//                tmpRange = new ArrayList<>();
-//            }
-//        }
-//        int maxSize = 0;
-//
-//        for(ArrayList<Short> oneList: addressRange) {
-//            if (maxSize < oneList.size()) {
-//                maxSize = oneList.size();
-//                maxRange = oneList;
-//            }
-//        }
-//        if (maxRange.size() != 0) {
-//
-//            Short[] stockArr = new Short[maxRange.size()];
-//            stockArr = maxRange.toArray(stockArr);
-//            for (Short el: stockArr)
-//                System.out.println("   -----    " + el);
-//            System.out.println("   -stockArr[0]    " + stockArr[0]);
-//            System.out.println("   -stockArr[stockArr.length-1]    " + stockArr[stockArr.length-1]);
-//            range a = new range(stockArr[0], stockArr[stockArr.length-1]);
-//            r.value = a;
-//        }
-
-
     }
 }
 

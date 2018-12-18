@@ -14,56 +14,66 @@ import com.sun.corba.se.org.omg.CORBA.ORB;
 
 class OptimizationImpl extends optimizationPOA implements optimizationOperations {
 
-    class SingleServer {
+    class ServerItem {
         private short ip;
         private int id;
         private int timeout;
-        private long timeFromLastHello;
+        private long lastHello;
 
-        public SingleServer(int id, short ip, int timeout) {
+        public ServerItem(int id, short ip, int timeout) {
             this.id = id;
             this.ip = ip;
             this.timeout = timeout;
         }
 
+        public short getIp() {
+            return ip;
+        }
 
+        public int getId() {
+            return id;
+        }
+
+        public int getTimeout() {
+            return timeout;
+        }
 
         public void setTimeout(int timeout) {
             this.timeout = timeout;
         }
 
-        public void activate() {
-            this.timeFromLastHello = System.currentTimeMillis();
+        public void hello() {
+            lastHello = System.currentTimeMillis();
         }
 
         public boolean isActive() {
-            return System.currentTimeMillis() - timeFromLastHello < timeout;
+            return System.currentTimeMillis() - lastHello < timeout;
         }
     }
 
-    class ServerItemIpComparator implements Comparator<SingleServer> {
+    class ServerItemIpComparator implements Comparator<ServerItem> {
         @Override
-        public int compare(SingleServer o1, SingleServer o2) {
-            return o1.ip - o2.ip;
+        public int compare(ServerItem o1, ServerItem o2) {
+            return o1.getIp() - o2.getIp();
         }
     }
 
     static AtomicInteger idCount = new AtomicInteger(0);
 
-    private ConcurrentHashMap<Integer, SingleServer> idServerMap = new ConcurrentHashMap<Integer, SingleServer>();
-    private ConcurrentHashMap<Short, SingleServer> ipServerMap = new ConcurrentHashMap<Short, SingleServer>();
-    private ConcurrentSkipListSet<SingleServer> serverList = new ConcurrentSkipListSet<SingleServer>(new ServerItemIpComparator());
+    private ConcurrentHashMap<Integer, ServerItem> idServerMap = new ConcurrentHashMap<Integer, ServerItem>();
+    private ConcurrentHashMap<Short, ServerItem> ipServerMap = new ConcurrentHashMap<Short, ServerItem>();
+    private ConcurrentSkipListSet<ServerItem> serverList = new ConcurrentSkipListSet<ServerItem>(new ServerItemIpComparator());
 
     @Override
     public void register(short ip, int timeout, IntHolder id) {
-        SingleServer serverItem = ipServerMap.get(ip);
+        ServerItem serverItem = ipServerMap.get(ip);
         if (serverItem != null) {
             serverItem.setTimeout(timeout);
-            id.value = serverItem.id;
+            id.value = serverItem.getId();
         } else {
             id.value = idCount.getAndIncrement();
-            serverItem = new SingleServer(id.value, ip, timeout);
-            serverItem.activate();
+            serverItem = new ServerItem(id.value, ip, timeout);
+            serverItem.hello();
             ipServerMap.put(ip, serverItem);
             idServerMap.put(id.value, serverItem);
             serverList.add(serverItem);
@@ -72,25 +82,25 @@ class OptimizationImpl extends optimizationPOA implements optimizationOperations
 
     @Override
     public void hello(int id) {
-        SingleServer serverItem = idServerMap.get(id);
+        ServerItem serverItem = idServerMap.get(id);
         if (serverItem != null) {
-            serverItem.activate();
+            serverItem.hello();
         }
     }
 
     @Override
     public void best_range(rangeHolder r) {
         range bestRange = null, tmpRange = null;
-        Iterator<SingleServer> it = serverList.iterator();
+        Iterator<ServerItem> it = serverList.iterator();
         while (it.hasNext()) {
-            SingleServer sItem = it.next();
+            ServerItem sItem = it.next();
             if (tmpRange == null && sItem.isActive()) {
-                tmpRange = new range(sItem.ip, sItem.ip);
+                tmpRange = new range(sItem.getIp(), sItem.getIp());
             } else if (tmpRange != null && sItem.isActive()) {
-                if (sItem.ip - 1 == tmpRange.to) {
+                if (sItem.getIp() - 1 == tmpRange.to) {
                     tmpRange.to += 1;
                 } else {
-                    tmpRange = new range(sItem.ip, sItem.ip);
+                    tmpRange = new range(sItem.getIp(), sItem.getIp());
                 }
             } else {
                 tmpRange = null;
